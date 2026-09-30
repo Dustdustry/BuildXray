@@ -1,0 +1,9 @@
+{
+    "name": "build-xray",
+    "displayName": "Build X-ray",
+    "author": "minRi2",
+    "description": "Make things transparent when you are building or planning.",
+    "version": "1.0",
+    "hidden": true,
+    "minGameVersion": 160
+}
