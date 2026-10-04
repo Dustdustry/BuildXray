@@ -39,8 +39,12 @@ Events.on(ClientLoadEvent, e => {
     });
 
     function addSettings(settings) {
-        settings.addCategory("build-xray");
-        settings.sliderPref("build-xray.transparent", transparent, 0, 100, 10, p => p + "%");
+        // add category for mdtx
+        if (settings.addCategory) {
+            settings.addCategory("build-xray");
+        }
+
+        settings.sliderPref("build-xray.transparent", transparent, 0, 100, 5, p => p + "%");
         settings.sliderPref("build-xray.mouse-mask-radius", mouseMaskRadius, 8, 64, 4, p =>
             Core.bundle.format("setting.tile", p),
         );
