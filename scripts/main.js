@@ -122,6 +122,7 @@ Events.run(Trigger.draw, () => {
             screenBuffer.end();
 
             transBuffer.getTexture().bind(1);
+            Blending.normal.apply(); // 最后一个 DrawRequest 的混合模式不会恢复，需要手动恢复
             screenBuffer.blit(transShader);
         });
     }
