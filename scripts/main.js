@@ -109,9 +109,12 @@ Events.run(Trigger.draw, () => {
 
     transBuffer.end();
 
+    // beam drill
+    applyTrans(Layer.power - 1.001, Layer.power - 0.999);
+    // leg units
     applyTrans(Layer.legUnit - 2.001, Layer.legUnit + 2.001);
+    // flying units
     applyTrans(Layer.flyingUnitLow - 2.001, Layer.flyingUnit + 2.001);
-    // applyTrans(Layer.overlayUI - 0.001, Layer.overlayUI + 0.001)
 
     function applyTrans(zStart, zEnd) {
         Draw.draw(zStart, () => {
