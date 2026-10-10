@@ -28,15 +28,39 @@ const transShader = extend(Shader, findShaderFi("screenspace.vert").readString()
 var transparent = 0.8;
 var mouseMaskRadius = Vars.tilesize * 32;
 
-var transProgress = 0;
+var fadeInTime = 0.15;
+var fadeOutTime = 1.2;
+
+var fadeProgress = 0;
+var transProgress = 0; // = Interp.smoother(fade)
+var areaMask = {draw: null, frame: -1},
+    circleMask = {draw: null, frame: -1};
 
 Events.on(ClientLoadEvent, e => {
+    changeModDescription();
+
     addSettings(Vars.ui.settings.graphics);
 
     Events.run(Trigger.update, () => {
         transparent = Core.settings.getInt("build-xray.transparent") / 100;
         mouseMaskRadius = Core.settings.getInt("build-xray.mouse-mask-radius") * Vars.tilesize;
+        fadeInTime = Core.settings.getInt("build-xray.fade-in") / 1000;
+        fadeOutTime = Core.settings.getInt("build-xray.fade-out") / 1000;
     });
+
+    function changeModDescription() {
+        const key = "build-xray.description";
+        let i = 0;
+        const lines = [];
+        while (Core.bundle.has(key + "." + i)) {
+            lines.push(Core.bundle.get(key + "." + i));
+            i++;
+        }
+
+        if (lines.length > 0) {
+            thisMod.meta.description = lines.map(l => UI.formatIcons(l)).join("\n");
+        }
+    }
 
     function addSettings(settings) {
         // add category for mdtx
@@ -44,9 +68,16 @@ Events.on(ClientLoadEvent, e => {
             settings.addCategory("build-xray");
         }
 
-        settings.sliderPref("build-xray.transparent", transparent, 0, 100, 5, p => p + "%");
-        settings.sliderPref("build-xray.mouse-mask-radius", mouseMaskRadius, 8, 64, 4, p =>
+        // sliderPref 的 def/min/max 用的是滑块自己的单位（% / 格 / ms）
+        settings.sliderPref("build-xray.transparent", Math.round(transparent * 100), 0, 100, 5, p => p + "%");
+        settings.sliderPref("build-xray.mouse-mask-radius", Math.round(mouseMaskRadius / Vars.tilesize), 8, 64, 4, p =>
             Core.bundle.format("setting.tile", p),
+        );
+        settings.sliderPref("build-xray.fade-in", Math.round(fadeInTime * 1000), 0, 1000, 50, p =>
+            Core.bundle.format("setting.milliseconds", p),
+        );
+        settings.sliderPref("build-xray.fade-out", Math.round(fadeOutTime * 1000), 0, 3000, 100, p =>
+            Core.bundle.format("setting.milliseconds", p),
         );
     }
 });
@@ -62,16 +93,27 @@ Events.run(Trigger.draw, () => {
           !Core.scene.hasKeyboard()
         : input.schematicMode;
 
-    const isPlanning =
-        isSchematicSelecting ||
-        input.isPlacing() ||
-        input.isBreaking() ||
-        input.isDroppingItem() ||
-        input.isRebuildSelecting();
+    const isBreaking = input.isBreaking();
+    const isRebuildSelecting = input.isRebuildSelecting();
+    const isPlacingOrDropping = input.isPlacing() || input.isDroppingItem();
 
-    transProgress = Mathf.lerp(transProgress, Mathf.num(isPlanning), 0.02);
+    const isPlanning = isSchematicSelecting || isBreaking || isRebuildSelecting || isPlacingOrDropping;
 
-    if (Mathf.zero(transProgress)) return;
+    const drawFrame = Core.graphics.getFrameId();
+
+    fadeProgress = Mathf.approachDelta(
+        fadeProgress,
+        Mathf.num(isPlanning),
+        1 / 60 / (isPlanning ? fadeInTime : fadeOutTime),
+    );
+
+    if (Mathf.zero(fadeProgress)) {
+        transProgress = 0;
+        areaMask.draw = circleMask.draw = null;
+        return;
+    }
+
+    transProgress = Interp.smoother.apply(fadeProgress);
 
     transBuffer.resize(Core.graphics.getWidth(), Core.graphics.getHeight());
     screenBuffer.resize(Core.graphics.getWidth(), Core.graphics.getHeight());
@@ -80,29 +122,41 @@ Events.run(Trigger.draw, () => {
 
     Draw.alpha(transProgress * transparent);
 
-    if (input.isBreaking()) {
+    if (isBreaking) {
         const maxLength =
             isDesktop && Core.input.keyDown(Binding.schematicSelect) && input.schemX != -1 && input.schemY != -1
                 ? Vars.maxSchematicSize
                 : 100;
-        drawSelectionArea(
+        drawAreaMask(
             isDesktop ? input.selectX : input.lineStartX,
             isDesktop ? input.selectY : input.lineStartY,
             maxLength,
         );
     } else if (isSchematicSelecting) {
-        drawSelectionArea(
+        drawAreaMask(
             isDesktop ? input.schemX : input.lineStartX,
             isDesktop ? input.schemY : input.lineStartY,
             Vars.maxSchematicSize,
         );
-    } else if (input.isRebuildSelecting()) {
-        drawSelectionArea(isDesktop ? input.schemX : input.lineStartX, isDesktop ? input.schemY : input.lineStartY, 0);
+    } else if (isRebuildSelecting) {
+        drawAreaMask(isDesktop ? input.schemX : input.lineStartX, isDesktop ? input.schemY : input.lineStartY, 0);
     }
 
-    if (input.isPlacing() || input.isDroppingItem()) {
+    if (isPlacingOrDropping) {
         const {x, y} = Core.input.mouseWorld();
         Draw.rect("circle-shadow", x, y, mouseMaskRadius, mouseMaskRadius);
+        circleMask.draw = () => Draw.rect("circle-shadow", x, y, mouseMaskRadius, mouseMaskRadius);
+        circleMask.frame = drawFrame;
+    }
+
+    // 本帧如果没有任何实时 mask，说明动作都结束了、alpha 正在衰减：用冻结的几何继续显示
+    // 反之（有实时 mask）就丢弃另一类冻结几何，避免它之后又冒出来
+    if (areaMask.frame === drawFrame || circleMask.frame === drawFrame) {
+        if (areaMask.frame !== drawFrame) areaMask.draw = null;
+        if (circleMask.frame !== drawFrame) circleMask.draw = null;
+    } else {
+        if (areaMask.draw) areaMask.draw();
+        if (circleMask.draw) circleMask.draw();
     }
 
     Draw.reset();
@@ -131,7 +185,8 @@ Events.run(Trigger.draw, () => {
     }
 });
 
-function drawSelectionArea(startX, startY, maxLength) {
+// 采集范围框：把最终矩形（中心 + 尺寸）冻结下来，之后重放不再依赖输入状态
+function drawAreaMask(startX, startY, maxLength) {
     if (startX < 0 || startY < 0) return;
 
     const {x, y} = Core.input.mouseWorld();
@@ -145,15 +200,16 @@ function drawSelectionArea(startX, startY, maxLength) {
         maxLength,
         1,
     );
-    drawAreaMask(result.x, result.y, result.x2, result.y2);
-}
 
-function drawAreaMask(x, y, x2, y2) {
-    const centerX = (x + x2) / 2,
-        centerY = (y + y2) / 2;
-    const width = (x2 - x) * Mathf.sqrt2 * 1.5,
-        height = (y2 - y) * Mathf.sqrt2 * 1.5;
+    const centerX = (result.x + result.x2) / 2,
+        centerY = (result.y + result.y2) / 2;
+    const width = (result.x2 - result.x) * Mathf.sqrt2 * 1.5,
+        height = (result.y2 - result.y) * Mathf.sqrt2 * 1.5;
+
     Draw.rect("circle-shadow", centerX, centerY, width, height);
+
+    areaMask.draw = () => Draw.rect("circle-shadow", centerX, centerY, width, height);
+    areaMask.frame = Core.graphics.getFrameId();
 }
 
 function findShaderFi(name) {
