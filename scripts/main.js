@@ -167,6 +167,8 @@ Events.run(Trigger.draw, () => {
     applyTrans(Layer.power - 1.001, Layer.power - 0.999);
     // leg units
     applyTrans(Layer.legUnit - 2.001, Layer.legUnit + 2.001);
+    // darkness and unit shadows
+    applyTrans(Layer.darkness - 0.001, Layer.darkness + 0.001);
     // flying units
     applyTrans(Layer.flyingUnitLow - 2.001, Layer.flyingUnit + 2.001);
 
