@@ -5,6 +5,8 @@ const transBuffer = new FrameBuffer();
 const thisMod = Vars.mods.locateMod(modName);
 const shaderFolder = thisMod.root.child("shaders");
 
+const peekBind = KeyBind.add("build-xray.peek", KeyCode.altLeft, "build-xray");
+
 const buildXrayFrag = [
     "uniform sampler2D u_texture;",
     "uniform sampler2D u_trans_texture;",
@@ -96,8 +98,9 @@ Events.run(Trigger.draw, () => {
     const isBreaking = input.isBreaking();
     const isRebuildSelecting = input.isRebuildSelecting();
     const isPlacingOrDropping = input.isPlacing() || input.isDroppingItem();
+    const isPeeking = Core.input.keyDown(peekBind) && !Core.scene.hasKeyboard();
 
-    const isPlanning = isSchematicSelecting || isBreaking || isRebuildSelecting || isPlacingOrDropping;
+    const isPlanning = isSchematicSelecting || isBreaking || isRebuildSelecting || isPlacingOrDropping || isPeeking;
 
     const drawFrame = Core.graphics.getFrameId();
 
@@ -142,7 +145,7 @@ Events.run(Trigger.draw, () => {
         drawAreaMask(isDesktop ? input.schemX : input.lineStartX, isDesktop ? input.schemY : input.lineStartY, 0);
     }
 
-    if (isPlacingOrDropping) {
+    if (isPlacingOrDropping || isPeeking) {
         const {x, y} = Core.input.mouseWorld();
         Draw.rect("circle-shadow", x, y, mouseMaskRadius, mouseMaskRadius);
         circleMask.draw = () => Draw.rect("circle-shadow", x, y, mouseMaskRadius, mouseMaskRadius);
