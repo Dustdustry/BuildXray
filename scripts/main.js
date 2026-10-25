@@ -1,4 +1,5 @@
-// code by minRi2
+const {getPlanArea} = require("plan-area");
+
 const screenBuffer = new FrameBuffer();
 const transBuffer = new FrameBuffer();
 
@@ -26,6 +27,9 @@ const transShader = extend(Shader, findShaderFi("screenspace.vert").readString()
         this.setUniformi("u_trans_texture", 1);
     },
 });
+
+// 缩放遮罩后，遮罩大约 90% 的透明度在原先的边界内
+const maskMainRadiusScl = Mathf.sqrt2 * 1.5;
 
 var transparent = 0.8;
 var mouseMaskRadius = Vars.tilesize * 32;
@@ -99,8 +103,15 @@ Events.run(Trigger.draw, () => {
     const isRebuildSelecting = input.isRebuildSelecting();
     const isPlacingOrDropping = input.isPlacing() || input.isDroppingItem();
     const isPeeking = Core.input.keyDown(peekBind) && !Core.scene.hasKeyboard();
+    const planArea = getPlanArea();
 
-    const isPlanning = isSchematicSelecting || isBreaking || isRebuildSelecting || isPlacingOrDropping || isPeeking;
+    const isPlanning =
+        isSchematicSelecting ||
+        isBreaking ||
+        isRebuildSelecting ||
+        isPlacingOrDropping ||
+        isPeeking ||
+        planArea != null;
 
     const drawFrame = Core.graphics.getFrameId();
 
@@ -143,6 +154,9 @@ Events.run(Trigger.draw, () => {
         );
     } else if (isRebuildSelecting) {
         drawAreaMask(isDesktop ? input.schemX : input.lineStartX, isDesktop ? input.schemY : input.lineStartY, 0);
+    } else if (planArea != null) {
+        // planArea 需要更大的额外范围
+        drawMaskRect(planArea.x1, planArea.y1, planArea.x2, planArea.y2, maskMainRadiusScl * 2);
     }
 
     if (isPlacingOrDropping || isPeeking) {
@@ -206,10 +220,16 @@ function drawAreaMask(startX, startY, maxLength) {
         1,
     );
 
-    const centerX = (result.x + result.x2) / 2,
-        centerY = (result.y + result.y2) / 2;
-    const width = (result.x2 - result.x) * Mathf.sqrt2 * 1.5,
-        height = (result.y2 - result.y) * Mathf.sqrt2 * 1.5;
+    drawMaskRect(result.x, result.y, result.x2, result.y2);
+}
+
+function drawMaskRect(x1, y1, x2, y2, growScl) {
+    if (!growScl) growScl = maskMainRadiusScl;
+
+    const centerX = (x1 + x2) / 2,
+        centerY = (y1 + y2) / 2;
+    const width = (x2 - x1) * growScl,
+        height = (y2 - y1) * growScl;
 
     Draw.rect("circle-shadow", centerX, centerY, width, height);
 
