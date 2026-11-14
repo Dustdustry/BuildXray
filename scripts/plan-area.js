@@ -18,6 +18,11 @@ function getPlanArea() {
 
     const input = Vars.control.input;
 
+    // 只统计玩家当前单位 buildRange 内的计划
+    const unit = Vars.player.unit();
+    if (unit == null) return null;
+    const range = unit.type.buildRange;
+
     let minX = Infinity,
         minY = Infinity,
         maxX = -Infinity,
@@ -25,6 +30,9 @@ function getPlanArea() {
 
     const include = plan => {
         if (plan == null) return;
+        // getX/getY 就是 drawx/drawy（方块中心），超出 buildRange 的计划不算
+        if (!unit.within(plan.getX(), plan.getY(), range)) return;
+
         plan.hitbox(planRect);
 
         minX = Math.min(minX, planRect.x);
