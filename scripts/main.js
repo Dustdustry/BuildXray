@@ -1,46 +1,96 @@
 const {getPlanArea} = require("plan-area");
 
 const screenBuffer = new FrameBuffer();
-const transBuffer = new FrameBuffer();
 
 const thisMod = Vars.mods.locateMod(modName);
 const shaderFolder = thisMod.root.child("shaders");
 
 const peekBind = KeyBind.add("build-xray.peek", KeyCode.altLeft, "build-xray");
 
+// 边缘最小宽度的像素范围，实际值在 maskSoft 的 0..1 之间插值
+const maskEdgePxMin = 2,
+    maskEdgePxMax = 48;
+
 const buildXrayFrag = [
+    // 世界坐标数值大，GLES 的 mediump 精度不够
+    "#define HIGHP",
     "uniform sampler2D u_texture;",
-    "uniform sampler2D u_trans_texture;",
+    "uniform vec2 u_camPos;",
+    "uniform vec2 u_camSize;",
+    "uniform float u_strength;",
+    "uniform float u_bandScl;",
+    "uniform float u_edge;",
+    "uniform vec4 u_shapeA;",
+    "uniform vec4 u_shapeB;",
+    "uniform vec2 u_shapeType;",
     "",
     "varying vec2 v_texCoords;",
     "",
+    "float soft(float d, float band){",
+    "    return 1.0 - smoothstep(0.0, band, d);",
+    "}",
+    "",
+    "float rectMask(vec2 p, vec4 s){",
+    "    vec2 q = abs(p - s.xy) - s.zw;",
+    "    return soft(length(max(q, 0.0)), max(u_edge, min(s.z, s.w) * u_bandScl));",
+    "}",
+    "",
+    "float circleMask(vec2 p, vec4 s){",
+    "    return soft(length(p - s.xy) - s.z, max(u_edge, s.z * u_bandScl));",
+    "}",
+    "",
+    "float shapeMask(vec2 p, vec4 s, float type){",
+    "    if(type > 1.5) return circleMask(p, s);",
+    "    if(type > 0.5) return rectMask(p, s);",
+    "    return 0.0;",
+    "}",
+    "",
     "void main(){",
+    // v_texCoords 恒为 0..1 覆盖当前目标视口；gl_FragCoord 会随 pixelate 的分辨率变化
+    "    vec2 ndc = v_texCoords * 2.0 - 1.0;",
+    "    vec2 world = u_camPos + ndc * u_camSize * 0.5;",
+    "",
+    "    float mask = max(shapeMask(world, u_shapeA, u_shapeType.x), shapeMask(world, u_shapeB, u_shapeType.y));",
+    "",
     "    vec4 color = texture2D(u_texture, v_texCoords);",
-    "    float alpha = texture2D(u_trans_texture, v_texCoords).a;",
-    "    color.a *= 1.0 - alpha;",
-    "    gl_FragColor = color;",
+    "    gl_FragColor = vec4(color.rgb, color.a * (1.0 - mask * u_strength));",
     "}",
 ].join("\n");
 
 const transShader = extend(Shader, findShaderFi("screenspace.vert").readString(), buildXrayFrag, {
     apply() {
-        this.setUniformi("u_trans_texture", 1);
+        const cam = Core.camera;
+        const a = areaMask.shape,
+            b = circleMask.shape;
+        const edgePx = maskEdgePxMin + (maskEdgePxMax - maskEdgePxMin) * maskSoft;
+
+        this.setUniformf("u_camPos", cam.position.x, cam.position.y);
+        this.setUniformf("u_camSize", cam.width, cam.height);
+        this.setUniformf("u_strength", transProgress * transparent);
+        this.setUniformf("u_bandScl", maskSoft);
+        this.setUniformf("u_edge", (edgePx * cam.height) / Core.graphics.getHeight());
+
+        this.setUniformf("u_shapeA", a.x, a.y, a.halfW, a.halfH);
+        this.setUniformf("u_shapeB", b.x, b.y, b.halfW, b.halfH);
+        this.setUniformf("u_shapeType", a.type, b.type);
     },
 });
 
-// 缩放遮罩后，遮罩大约 90% 的透明度在原先的边界内
-const maskMainRadiusScl = Mathf.sqrt2 * 1.5;
-
 var transparent = 0.8;
-var mouseMaskRadius = Vars.tilesize * 32;
+var mouseMaskRadius = Vars.tilesize * 16;
+var maskSoft = 0.5;
 
 var fadeInTime = 0.15;
 var fadeOutTime = 1.2;
 
+
 var fadeProgress = 0;
-var transProgress = 0; // = Interp.smoother(fade)
-var areaMask = {draw: null, frame: -1},
-    circleMask = {draw: null, frame: -1};
+var transProgress = 0;
+
+// type: 0=不用 1=矩形 2=圆
+const noShape = {type: 0, x: 0, y: 0, halfW: 0, halfH: 0};
+var areaMask = {shape: noShape, frame: -1},
+    circleMask = {shape: noShape, frame: -1};
 
 Events.on(ClientLoadEvent, e => {
     changeModDescription();
@@ -52,6 +102,7 @@ Events.on(ClientLoadEvent, e => {
         mouseMaskRadius = Core.settings.getInt("build-xray.mouse-mask-radius") * Vars.tilesize;
         fadeInTime = Core.settings.getInt("build-xray.fade-in") / 1000;
         fadeOutTime = Core.settings.getInt("build-xray.fade-out") / 1000;
+        maskSoft = Core.settings.getInt("build-xray.mask-soft") / 100;
     });
 
     function changeModDescription() {
@@ -74,9 +125,9 @@ Events.on(ClientLoadEvent, e => {
             settings.addCategory("build-xray");
         }
 
-        // sliderPref 的 def/min/max 用的是滑块自己的单位（% / 格 / ms）
         settings.sliderPref("build-xray.transparent", Math.round(transparent * 100), 0, 100, 5, p => p + "%");
-        settings.sliderPref("build-xray.mouse-mask-radius", Math.round(mouseMaskRadius / Vars.tilesize), 8, 64, 4, p =>
+        settings.sliderPref("build-xray.mask-soft", Math.round(maskSoft * 100), 0, 100, 5, p => p + "%");
+        settings.sliderPref("build-xray.mouse-mask-radius", Math.round(mouseMaskRadius / Vars.tilesize), 4, 32, 4, p =>
             Core.bundle.format("setting.tile", p),
         );
         settings.sliderPref("build-xray.fade-in", Math.round(fadeInTime * 1000), 0, 1000, 50, p =>
@@ -123,62 +174,58 @@ Events.run(Trigger.draw, () => {
 
     if (Mathf.zero(fadeProgress)) {
         transProgress = 0;
-        areaMask.draw = circleMask.draw = null;
+        areaMask.shape = circleMask.shape = noShape;
         return;
     }
 
     transProgress = Interp.smoother.apply(fadeProgress);
 
-    transBuffer.resize(Core.graphics.getWidth(), Core.graphics.getHeight());
     screenBuffer.resize(Core.graphics.getWidth(), Core.graphics.getHeight());
 
-    transBuffer.begin(Color.clear);
-
-    Draw.alpha(transProgress * transparent);
+    let areaShape = noShape;
 
     if (isBreaking) {
         const maxLength =
             isDesktop && Core.input.keyDown(Binding.schematicSelect) && input.schemX != -1 && input.schemY != -1
                 ? Vars.maxSchematicSize
                 : 100;
-        drawAreaMask(
+        areaShape = areaRectShape(
             isDesktop ? input.selectX : input.lineStartX,
             isDesktop ? input.selectY : input.lineStartY,
             maxLength,
         );
     } else if (isSchematicSelecting) {
-        drawAreaMask(
+        areaShape = areaRectShape(
             isDesktop ? input.schemX : input.lineStartX,
             isDesktop ? input.schemY : input.lineStartY,
             Vars.maxSchematicSize,
         );
     } else if (isRebuildSelecting) {
-        drawAreaMask(isDesktop ? input.schemX : input.lineStartX, isDesktop ? input.schemY : input.lineStartY, 0);
+        areaShape = areaRectShape(
+            isDesktop ? input.schemX : input.lineStartX,
+            isDesktop ? input.schemY : input.lineStartY,
+            0,
+        );
     } else if (planArea != null) {
-        // planArea 需要更大的额外范围
-        drawMaskRect(planArea.x1, planArea.y1, planArea.x2, planArea.y2, maskMainRadiusScl * 2);
+        areaShape = rectShape(planArea.x1, planArea.y1, planArea.x2, planArea.y2);
+    }
+
+    if (areaShape !== noShape) {
+        areaMask.shape = areaShape;
+        areaMask.frame = drawFrame;
     }
 
     if (isPlacingOrDropping || isPeeking) {
         const {x, y} = Core.input.mouseWorld();
-        Draw.rect("circle-shadow", x, y, mouseMaskRadius, mouseMaskRadius);
-        circleMask.draw = () => Draw.rect("circle-shadow", x, y, mouseMaskRadius, mouseMaskRadius);
+        circleMask.shape = circleShape(x, y, mouseMaskRadius);
         circleMask.frame = drawFrame;
     }
 
-    // 本帧如果没有任何实时 mask，说明动作都结束了、alpha 正在衰减：用冻结的几何继续显示
-    // 反之（有实时 mask）就丢弃另一类冻结几何，避免它之后又冒出来
+    // 有实时形状的这一帧就丢掉另一类的冻结形状，没有则保留它继续淡出
     if (areaMask.frame === drawFrame || circleMask.frame === drawFrame) {
-        if (areaMask.frame !== drawFrame) areaMask.draw = null;
-        if (circleMask.frame !== drawFrame) circleMask.draw = null;
-    } else {
-        if (areaMask.draw) areaMask.draw();
-        if (circleMask.draw) circleMask.draw();
+        if (areaMask.frame !== drawFrame) areaMask.shape = noShape;
+        if (circleMask.frame !== drawFrame) circleMask.shape = noShape;
     }
-
-    Draw.reset();
-
-    transBuffer.end();
 
     // beam drill
     applyTrans(Layer.power - 1.001, Layer.power - 0.999);
@@ -196,17 +243,22 @@ Events.run(Trigger.draw, () => {
 
         Draw.draw(zEnd, () => {
             screenBuffer.end();
-
-            transBuffer.getTexture().bind(1);
-            Blending.normal.apply(); // 最后一个 DrawRequest 的混合模式不会恢复，需要手动恢复
+            Blending.normal.apply();
             screenBuffer.blit(transShader);
         });
     }
 });
 
-// 采集范围框：把最终矩形（中心 + 尺寸）冻结下来，之后重放不再依赖输入状态
-function drawAreaMask(startX, startY, maxLength) {
-    if (startX < 0 || startY < 0) return;
+function rectShape(x1, y1, x2, y2) {
+    return {type: 1, x: (x1 + x2) / 2, y: (y1 + y2) / 2, halfW: (x2 - x1) / 2, halfH: (y2 - y1) / 2};
+}
+
+function circleShape(x, y, radius) {
+    return {type: 2, x: x, y: y, halfW: radius, halfH: radius};
+}
+
+function areaRectShape(startX, startY, maxLength) {
+    if (startX < 0 || startY < 0) return noShape;
 
     const {x, y} = Core.input.mouseWorld();
     const result = Placement.normalizeDrawArea(
@@ -220,21 +272,7 @@ function drawAreaMask(startX, startY, maxLength) {
         1,
     );
 
-    drawMaskRect(result.x, result.y, result.x2, result.y2);
-}
-
-function drawMaskRect(x1, y1, x2, y2, growScl) {
-    if (!growScl) growScl = maskMainRadiusScl;
-
-    const centerX = (x1 + x2) / 2,
-        centerY = (y1 + y2) / 2;
-    const width = (x2 - x1) * growScl,
-        height = (y2 - y1) * growScl;
-
-    Draw.rect("circle-shadow", centerX, centerY, width, height);
-
-    areaMask.draw = () => Draw.rect("circle-shadow", centerX, centerY, width, height);
-    areaMask.frame = Core.graphics.getFrameId();
+    return rectShape(result.x, result.y, result.x2, result.y2);
 }
 
 function findShaderFi(name) {
@@ -247,3 +285,4 @@ function findShaderFi(name) {
     fi = Core.files.internal("shaders/" + name);
     return fi && fi.exists() ? fi : null;
 }
+
