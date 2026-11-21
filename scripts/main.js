@@ -83,6 +83,8 @@ var maskSoft = 0.5;
 var fadeInTime = 0.15;
 var fadeOutTime = 1.2;
 
+var maskGroundUnits = true;
+
 
 var fadeProgress = 0;
 var transProgress = 0;
@@ -103,6 +105,7 @@ Events.on(ClientLoadEvent, e => {
         fadeInTime = Core.settings.getInt("build-xray.fade-in") / 1000;
         fadeOutTime = Core.settings.getInt("build-xray.fade-out") / 1000;
         maskSoft = Core.settings.getInt("build-xray.mask-soft") / 100;
+        maskGroundUnits = Core.settings.getBool("build-xray.ground-units");
     });
 
     function changeModDescription() {
@@ -136,6 +139,7 @@ Events.on(ClientLoadEvent, e => {
         settings.sliderPref("build-xray.fade-out", Math.round(fadeOutTime * 1000), 0, 3000, 100, p =>
             Core.bundle.format("setting.milliseconds", p),
         );
+        settings.checkPref("build-xray.ground-units", true);
     }
 });
 
@@ -229,6 +233,8 @@ Events.run(Trigger.draw, () => {
 
     // beam drill
     applyTrans(Layer.power - 1.001, Layer.power - 0.999);
+    // ground / naval units
+    if (maskGroundUnits) applyTrans(Layer.groundUnit - 2.001, Layer.groundUnit + 2.001);
     // leg units
     applyTrans(Layer.legUnit - 2.001, Layer.legUnit + 2.001);
     // darkness and unit shadows
