@@ -2,6 +2,7 @@ name: build-xray
 displayName: Build X-ray
 author: minRi2
 description: While building or planning, the x-ray lets you see the blocks and units behind the ones in front.
-version: 1.4
+version: 1.5
 hidden: true
 minGameVersion: 160
+repo: Dustdustry/BuildXray
