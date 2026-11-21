@@ -83,6 +83,7 @@ var maskSoft = 0.5;
 var fadeInTime = 0.15;
 var fadeOutTime = 1.2;
 
+var maskLogic = true;
 var maskGroundUnits = true;
 
 
@@ -105,6 +106,7 @@ Events.on(ClientLoadEvent, e => {
         fadeInTime = Core.settings.getInt("build-xray.fade-in") / 1000;
         fadeOutTime = Core.settings.getInt("build-xray.fade-out") / 1000;
         maskSoft = Core.settings.getInt("build-xray.mask-soft") / 100;
+        maskLogic = Core.settings.getBool("build-xray.logic");
         maskGroundUnits = Core.settings.getBool("build-xray.ground-units");
     });
 
@@ -139,6 +141,7 @@ Events.on(ClientLoadEvent, e => {
         settings.sliderPref("build-xray.fade-out", Math.round(fadeOutTime * 1000), 0, 3000, 100, p =>
             Core.bundle.format("setting.milliseconds", p),
         );
+        settings.checkPref("build-xray.logic", true);
         settings.checkPref("build-xray.ground-units", true);
     }
 });
@@ -158,6 +161,7 @@ Events.run(Trigger.draw, () => {
     const isRebuildSelecting = input.isRebuildSelecting();
     const isPlacingOrDropping = input.isPlacing() || input.isDroppingItem();
     const isPeeking = Core.input.keyDown(peekBind) && !Core.scene.hasKeyboard();
+    const logicArea = maskLogic ? getLogicSelectArea() : null;
     const planArea = getPlanArea();
 
     const isPlanning =
@@ -165,6 +169,7 @@ Events.run(Trigger.draw, () => {
         isBreaking ||
         isRebuildSelecting ||
         isPlacingOrDropping ||
+        logicArea != null ||
         isPeeking ||
         planArea != null;
 
@@ -210,6 +215,8 @@ Events.run(Trigger.draw, () => {
             isDesktop ? input.schemY : input.lineStartY,
             0,
         );
+    } else if (logicArea != null) {
+        areaShape = circleShape(logicArea.x, logicArea.y, logicArea.radius);
     } else if (planArea != null) {
         areaShape = rectShape(planArea.x1, planArea.y1, planArea.x2, planArea.y2);
     }
@@ -279,6 +286,16 @@ function areaRectShape(startX, startY, maxLength) {
     );
 
     return rectShape(result.x, result.y, result.x2, result.y2);
+}
+
+function getLogicSelectArea() {
+    const input = Vars.control.input;
+    const configFrag = input.config;
+    if (!configFrag.isShown() || configFrag.getSelected() == null) return;
+    const build = configFrag.getSelected();
+    if (!(build instanceof LogicBlock.LogicBuild)) return null;
+
+    return {x: build.x, y: build.y, radius: build.block.range};
 }
 
 function findShaderFi(name) {
