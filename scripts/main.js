@@ -19,8 +19,8 @@ const buildXrayFrag = [
     "uniform vec2 u_camSize;",
     "uniform float u_strength;",
     "uniform float u_bandScl;",
-    "uniform float u_rectExpand;",
     "uniform float u_edge;",
+    "uniform float u_rectExpand;",
     "uniform vec4 u_shapeA;",
     "uniform vec4 u_shapeB;",
     "uniform vec2 u_shapeType;",
@@ -69,8 +69,8 @@ const transShader = extend(Shader, findShaderFi("screenspace.vert").readString()
         this.setUniformf("u_camSize", cam.width, cam.height);
         this.setUniformf("u_strength", transProgress * transparent);
         this.setUniformf("u_bandScl", maskSoft);
-        this.setUniformf("u_rectExpand", rectExpandDist);
         this.setUniformf("u_edge", (edgePx * cam.height) / Core.graphics.getHeight());
+        this.setUniformf("u_rectExpand", rectExpandDist);
 
         this.setUniformf("u_shapeA", a.x, a.y, a.halfW, a.halfH);
         this.setUniformf("u_shapeB", b.x, b.y, b.halfW, b.halfH);
@@ -80,15 +80,15 @@ const transShader = extend(Shader, findShaderFi("screenspace.vert").readString()
 
 var transparent = 0.8;
 var mouseMaskRadius = Vars.tilesize * 16;
-var rectExpandDist = Vars.tilesize * 5;
 var maskSoft = 0.5;
+var rectExpandDist = Vars.tilesize * 5;
 
 var fadeInTime = 0.15;
 var fadeOutTime = 1.2;
 
-var maskLogic = true;
 var maskGroundUnits = true;
-
+var maskPlans = true;
+var maskLogic = true;
 
 var fadeProgress = 0;
 var transProgress = 0;
@@ -108,10 +108,11 @@ Events.on(ClientLoadEvent, e => {
         mouseMaskRadius = Core.settings.getInt("build-xray.mouse-mask-radius") * Vars.tilesize;
         fadeInTime = Core.settings.getInt("build-xray.fade-in") / 1000;
         fadeOutTime = Core.settings.getInt("build-xray.fade-out") / 1000;
-        rectExpandDist = Core.settings.getInt("build-xray.rect-expand") * Vars.tilesize;
-        maskSoft = Core.settings.getInt("build-xray.mask-soft") / 100;
-        maskLogic = Core.settings.getBool("build-xray.logic");
         maskGroundUnits = Core.settings.getBool("build-xray.ground-units");
+        maskPlans = Core.settings.getBool("build-xray.plans");
+        maskLogic = Core.settings.getBool("build-xray.logic");
+        maskSoft = Core.settings.getInt("build-xray.mask-soft") / 100;
+        rectExpandDist = Core.settings.getInt("build-xray.rect-expand") * Vars.tilesize;
     });
 
     function changeModDescription() {
@@ -148,8 +149,9 @@ Events.on(ClientLoadEvent, e => {
         settings.sliderPref("build-xray.fade-out", Math.round(fadeOutTime * 1000), 0, 3000, 100, p =>
             Core.bundle.format("setting.milliseconds", p),
         );
-        settings.checkPref("build-xray.logic", true);
         settings.checkPref("build-xray.ground-units", true);
+        settings.checkPref("build-xray.plans", true);
+        settings.checkPref("build-xray.logic", true);
     }
 });
 
@@ -168,16 +170,16 @@ Events.run(Trigger.draw, () => {
     const isRebuildSelecting = input.isRebuildSelecting();
     const isPlacingOrDropping = input.isPlacing() || input.isDroppingItem();
     const isPeeking = Core.input.keyDown(peekBind) && !Core.scene.hasKeyboard();
+    const planArea = maskPlans ? getPlanArea() : null;
     const logicArea = maskLogic ? getLogicSelectArea() : null;
-    const planArea = getPlanArea();
 
     const isPlanning =
         isSchematicSelecting ||
         isBreaking ||
         isRebuildSelecting ||
         isPlacingOrDropping ||
-        logicArea != null ||
         isPeeking ||
+        logicArea != null ||
         planArea != null;
 
     const drawFrame = Core.graphics.getFrameId();
@@ -315,4 +317,3 @@ function findShaderFi(name) {
     fi = Core.files.internal("shaders/" + name);
     return fi && fi.exists() ? fi : null;
 }
-
