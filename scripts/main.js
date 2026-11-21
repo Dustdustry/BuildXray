@@ -19,6 +19,7 @@ const buildXrayFrag = [
     "uniform vec2 u_camSize;",
     "uniform float u_strength;",
     "uniform float u_bandScl;",
+    "uniform float u_rectExpand;",
     "uniform float u_edge;",
     "uniform vec4 u_shapeA;",
     "uniform vec4 u_shapeB;",
@@ -32,7 +33,7 @@ const buildXrayFrag = [
     "",
     "float rectMask(vec2 p, vec4 s){",
     "    vec2 q = abs(p - s.xy) - s.zw;",
-    "    return soft(length(max(q, 0.0)), max(u_edge, min(s.z, s.w) * u_bandScl));",
+    "    return soft(length(max(q, 0.0)), max(u_edge, min(s.z, s.w) * u_bandScl) + u_rectExpand);",
     "}",
     "",
     "float circleMask(vec2 p, vec4 s){",
@@ -68,6 +69,7 @@ const transShader = extend(Shader, findShaderFi("screenspace.vert").readString()
         this.setUniformf("u_camSize", cam.width, cam.height);
         this.setUniformf("u_strength", transProgress * transparent);
         this.setUniformf("u_bandScl", maskSoft);
+        this.setUniformf("u_rectExpand", rectExpandDist);
         this.setUniformf("u_edge", (edgePx * cam.height) / Core.graphics.getHeight());
 
         this.setUniformf("u_shapeA", a.x, a.y, a.halfW, a.halfH);
@@ -78,6 +80,7 @@ const transShader = extend(Shader, findShaderFi("screenspace.vert").readString()
 
 var transparent = 0.8;
 var mouseMaskRadius = Vars.tilesize * 16;
+var rectExpandDist = Vars.tilesize * 5;
 var maskSoft = 0.5;
 
 var fadeInTime = 0.15;
@@ -105,6 +108,7 @@ Events.on(ClientLoadEvent, e => {
         mouseMaskRadius = Core.settings.getInt("build-xray.mouse-mask-radius") * Vars.tilesize;
         fadeInTime = Core.settings.getInt("build-xray.fade-in") / 1000;
         fadeOutTime = Core.settings.getInt("build-xray.fade-out") / 1000;
+        rectExpandDist = Core.settings.getInt("build-xray.rect-expand") * Vars.tilesize;
         maskSoft = Core.settings.getInt("build-xray.mask-soft") / 100;
         maskLogic = Core.settings.getBool("build-xray.logic");
         maskGroundUnits = Core.settings.getBool("build-xray.ground-units");
@@ -133,6 +137,9 @@ Events.on(ClientLoadEvent, e => {
         settings.sliderPref("build-xray.transparent", Math.round(transparent * 100), 0, 100, 5, p => p + "%");
         settings.sliderPref("build-xray.mask-soft", Math.round(maskSoft * 100), 0, 100, 5, p => p + "%");
         settings.sliderPref("build-xray.mouse-mask-radius", Math.round(mouseMaskRadius / Vars.tilesize), 4, 32, 4, p =>
+            Core.bundle.format("setting.tile", p),
+        );
+        settings.sliderPref("build-xray.rect-expand", Math.round(rectExpandDist / Vars.tilesize), 0, 15, 1, p =>
             Core.bundle.format("setting.tile", p),
         );
         settings.sliderPref("build-xray.fade-in", Math.round(fadeInTime * 1000), 0, 1000, 50, p =>
